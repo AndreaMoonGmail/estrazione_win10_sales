@@ -86,7 +86,10 @@ public class TerminalColumnService {
                     if (osVersionT != null && osVersionT.value != null) osVersion = osVersionT.value;
                 }
                 String val;
-                if (osType != null && osType.equalsIgnoreCase("WINDOWS")) {
+                if ((osType == null || osType.isBlank()) && (osVersion == null || osVersion.isBlank())) {
+                    // tid present but no metadata -> mark as N.D.
+                    val = "N.D.";
+                } else if (osType != null && osType.equalsIgnoreCase("WINDOWS")) {
                     if (osVersion != null && osVersion.startsWith("10.0.2")) {
                         val = tid + "_WIN11";
                     } else {

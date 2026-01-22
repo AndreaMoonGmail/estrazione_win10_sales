@@ -1,0 +1,36 @@
+Headers: {Idrice=0, ZonaRice=1, Tipo Rete=2, terminal_1=3, terminal_2=4, terminal_3=5}
+Idrice -> '285353'
+ZonaRice -> 'BA1002'
+Tipo Rete -> 'Rete Diretta Exclusive'
+terminal_1 -> '98125_WIN10'
+terminal_2 -> '118092_WIN10'
+terminal_3 -> 'null'
+
+Idrice -> '285381'
+ZonaRice -> 'BA1024'
+Tipo Rete -> 'Rete Diretta Exclusive'
+terminal_1 -> 'N.D.'
+terminal_2 -> 'null'
+terminal_3 -> 'null'
+
+Idrice -> '285389'
+ZonaRice -> 'BA1031'
+Tipo Rete -> 'Rete Diretta Exclusive'
+terminal_1 -> '117619_WIN10'
+terminal_2 -> 'null'
+terminal_3 -> 'null'
+
+Idrice -> '285406'
+ZonaRice -> 'BA1043'
+Tipo Rete -> 'Rete Diretta Exclusive'
+terminal_1 -> '113809_WIN10'
+terminal_2 -> 'null'
+terminal_3 -> 'null'
+
+Idrice -> '285435'
+ZonaRice -> 'BA1075'
+Tipo Rete -> 'Rete Diretta Exclusive'
+terminal_1 -> '78315_WIN11'
+terminal_2 -> '106881_WIN10'
+terminal_3 -> 'null'
+

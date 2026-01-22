@@ -277,6 +277,113 @@ public class CsvToExcelService {
             // write workbook to a temp file then move atomically
             Path out = Path.of(outputPath);
 
+            // Remove unwanted columns from sheet (chiave, tid, timestamp_TO_DELETE, valore, timestamp)
+            List<String> colsToRemove = Arrays.asList("chiave", "tid", "timestamp_TO_DELETE", "valore", "timestamp", "rice_id", "terminal_id");
+            // compute set of column indices to remove based on current header map
+            Set<Integer> removeIdx = new HashSet<>();
+            for (String cName : colsToRemove) {
+                Integer idx = existing.get(cName);
+                if (idx != null) removeIdx.add(idx);
+            }
+            if (!removeIdx.isEmpty()) {
+                // build list of kept column indices in ascending order
+                int maxCol = existing.values().stream().mapToInt(Integer::intValue).max().orElse(-1);
+                List<Integer> keepIndices = new ArrayList<>();
+                for (int ci = 0; ci <= maxCol; ci++) {
+                    if (!removeIdx.contains(ci)) keepIndices.add(ci);
+                }
+
+                // create a temporary sheet and copy only kept columns
+                String originalName = sheet.getSheetName();
+                Sheet newSheet = workbook.createSheet(originalName + "_copy");
+                int lastRow = sheet.getLastRowNum();
+                for (int r = 0; r <= lastRow; r++) {
+                    Row srcRow = sheet.getRow(r);
+                    Row dstRow = newSheet.createRow(r);
+                    if (srcRow == null) continue;
+                    for (int j = 0; j < keepIndices.size(); j++) {
+                        int srcCol = keepIndices.get(j);
+                        Cell srcCell = srcRow.getCell(srcCol);
+                        if (srcCell == null) continue;
+                        Cell dstCell = dstRow.createCell(j);
+                        copyCellValue(srcCell, dstCell);
+                    }
+                }
+                // remove the old sheet and rename the new one to original name
+                int origIndex = workbook.getSheetIndex(sheet);
+                workbook.removeSheetAt(origIndex);
+                int newIndex = workbook.getSheetIndex(newSheet);
+                workbook.setSheetName(newIndex, originalName);
+
+                // Safety: after creating the new sheet, ensure terminal_* values are present by rewriting them
+                Sheet finalSheet = workbook.getSheetAt(newIndex);
+                Map<String,Integer> finalHeaders = ExcelUtils.headerMap(finalSheet);
+                // build map riceId->row index for finalSheet
+                Map<String,List<Integer>> finalSheetRiceRows = new HashMap<>();
+                int lastR = finalSheet.getLastRowNum();
+                for (int rr = 1; rr <= lastR; rr++) {
+                    Row row = finalSheet.getRow(rr);
+                    if (row == null) continue;
+                    String v0 = ExcelUtils.getStringCellValue(row.getCell(0));
+                    if (v0 != null && !v0.isBlank()) finalSheetRiceRows.computeIfAbsent(v0, k -> new ArrayList<>()).add(rr);
+                }
+                // rewrite terminal values from previously computed terminalsByRiceId
+                for (Map.Entry<String, List<String>> te : terminalsByRiceId.entrySet()) {
+                    String riceId = te.getKey();
+                    List<Integer> crow = finalSheetRiceRows.get(riceId);
+                    if (crow == null || crow.isEmpty()) continue;
+                    int rowIdx = crow.get(0);
+                    Row dstRow = finalSheet.getRow(rowIdx);
+                    if (dstRow == null) dstRow = finalSheet.createRow(rowIdx);
+                    List<String> terms = te.getValue();
+                    for (int i = 0; i < terms.size(); i++) {
+                        String header = "terminal_" + (i + 1);
+                        Integer colIdx = finalHeaders.get(header);
+                        if (colIdx == null) continue;
+                        String val = terms.get(i);
+                        if (val == null) continue;
+                        Cell cell = ExcelUtils.createCellIfAbsent(dstRow, colIdx);
+                        cell.setCellValue(val);
+                    }
+                }
+
+                // Ensure rice_id and terminal_id are removed: if present in finalHeaders, make a filtered copy excluding them
+                List<String> mustRemove = Arrays.asList("rice_id", "terminal_id");
+                boolean needSecondFilter = false;
+                for (String rm : mustRemove) if (finalHeaders.containsKey(rm)) { needSecondFilter = true; break; }
+                if (needSecondFilter) {
+                    // compute keep columns based on finalHeaders order
+                    int maxCol2 = finalHeaders.values().stream().mapToInt(Integer::intValue).max().orElse(-1);
+                    List<Integer> keepIdx2 = new ArrayList<>();
+                    for (int ci = 0; ci <= maxCol2; ci++) {
+                        boolean remove = false;
+                        for (Map.Entry<String,Integer> fh : finalHeaders.entrySet()) {
+                            if (fh.getValue() == ci && mustRemove.contains(fh.getKey())) { remove = true; break; }
+                        }
+                        if (!remove) keepIdx2.add(ci);
+                    }
+                    Sheet filtered = workbook.createSheet(originalName + "_filtered");
+                    int lastRow2 = finalSheet.getLastRowNum();
+                    for (int r = 0; r <= lastRow2; r++) {
+                        Row src = finalSheet.getRow(r);
+                        Row dst = filtered.createRow(r);
+                        if (src == null) continue;
+                        for (int j = 0; j < keepIdx2.size(); j++) {
+                            int sc = keepIdx2.get(j);
+                            Cell scell = src.getCell(sc);
+                            if (scell == null) continue;
+                            Cell dcell = dst.createCell(j);
+                            copyCellValue(scell, dcell);
+                        }
+                    }
+                    // remove finalSheet and rename filtered to originalName
+                    int fi = workbook.getSheetIndex(finalSheet);
+                    workbook.removeSheetAt(fi);
+                    int idx2 = workbook.getSheetIndex(filtered);
+                    workbook.setSheetName(idx2, originalName);
+                }
+             }
+
             // Safety: avoid overwriting the input template file when templatePath is a filesystem path and equals outputPath
             if (!templatePath.startsWith("classpath:")) {
                 try {
@@ -342,6 +449,32 @@ public class CsvToExcelService {
                     throw new IOException("CSV parsing error", e);
                 }
             }
+        }
+    }
+
+    private void copyCellValue(Cell src, Cell dst) {
+        dst.setCellType(src.getCellType());
+        switch (src.getCellType()) {
+            case STRING:
+                dst.setCellValue(src.getStringCellValue());
+                break;
+            case BOOLEAN:
+                dst.setCellValue(src.getBooleanCellValue());
+                break;
+            case NUMERIC:
+                dst.setCellValue(src.getNumericCellValue());
+                break;
+            case FORMULA:
+                dst.setCellFormula(src.getCellFormula());
+                break;
+            case BLANK:
+                dst.setBlank();
+                break;
+            case ERROR:
+                dst.setCellErrorValue(src.getErrorCellValue());
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported cell type: " + src.getCellType());
         }
     }
 }

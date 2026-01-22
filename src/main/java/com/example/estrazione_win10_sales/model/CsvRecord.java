@@ -53,19 +53,34 @@ public class CsvRecord {
             throw new IllegalArgumentException("CSV row must have at least 4 columns: riceId, chiave, tid, valore");
         }
         String r = sanitize(row[0]);
-        String k = sanitize(row[1]);
-        String t = sanitize(row[2]);
+        String k = null;
+        String t = null;
         String v = null;
         String tsRaw = null;
-        if (row.length >= 6) {
-            // format with extra column (timestamp_TO_DELETE)
-            v = sanitize(row[4]);
-            tsRaw = sanitize(row[5]);
-        } else if (row.length == 5) {
-            v = sanitize(row[3]);
-            tsRaw = sanitize(row[4]);
-        } else if (row.length == 4) {
-            v = sanitize(row[3]);
+
+        // Detect layout where second column duplicates riceId (header shows: rice_id;rice_id;chiave;terminal_id;...)
+        if (row.length >= 7 && sanitize(row[1]) != null && sanitize(row[1]).equals(sanitize(row[0]))) {
+            // layout: 0=rice_id,1=rice_id,2=chiave,3=terminal_id,4=timestamp_TO_DELETE,5=valore,6=timestamp
+            k = sanitize(row[2]);
+            t = sanitize(row[3]);
+            v = sanitize(row[5]);
+            tsRaw = sanitize(row[6]);
+        } else {
+            // Fallback heuristics for other layouts
+            k = sanitize(row[1]);
+            t = sanitize(row[2]);
+            if (row.length >= 7) {
+                v = sanitize(row[5]);
+                tsRaw = sanitize(row[6]);
+            } else if (row.length == 6) {
+                v = sanitize(row[4]);
+                tsRaw = sanitize(row[5]);
+            } else if (row.length == 5) {
+                v = sanitize(row[3]);
+                tsRaw = sanitize(row[4]);
+            } else if (row.length == 4) {
+                v = sanitize(row[3]);
+            }
         }
 
         Instant ts = null;
@@ -99,6 +114,8 @@ public class CsvRecord {
         if (t.startsWith("\"") && t.endsWith("\"") && t.length() >= 2) {
             t = t.substring(1, t.length() - 1);
         }
+        if (t.isBlank()) return null;
+        if (t.equalsIgnoreCase("NULL")) return null;
         return t;
     }
 

@@ -36,20 +36,17 @@ public class TerminalDebug {
         TerminalColumnService svc = new TerminalColumnService();
         Map<String, java.util.List<String>> terminals = svc.computeTerminalsByRiceId(records);
 
-        System.out.println("terminalsByRiceId size: " + terminals.size());
-        String target = "283840";
-        if (terminals.containsKey(target)) {
-            System.out.println(target + " -> " + terminals.get(target));
-        } else {
-            System.out.println("No entry for " + target);
+        Path out = Path.of("terminal_debug_out.txt");
+        StringBuilder sb = new StringBuilder();
+        sb.append("terminalsByRiceId size: ").append(terminals.size()).append(System.lineSeparator());
+        String[] targets = new String[] {"283840","285353"};
+        for (String target : targets) {
+            if (terminals.containsKey(target)) {
+                sb.append(target).append(" -> ").append(terminals.get(target)).append(System.lineSeparator());
+            } else {
+                sb.append("No entry for ").append(target).append(System.lineSeparator());
+            }
         }
-
-        // Also print for 285353
-        String t2 = "285353";
-        if (terminals.containsKey(t2)) {
-            System.out.println(t2 + " -> " + terminals.get(t2));
-        } else {
-            System.out.println("No entry for " + t2);
-        }
+        java.nio.file.Files.writeString(out, sb.toString());
     }
 }
