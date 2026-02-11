@@ -71,7 +71,7 @@ public class CsvToExcelService {
             List<String> newHeaders = new ArrayList<>(Arrays.stream(headers)
                     .filter(h -> h != null && !h.isBlank())
                     .filter(h -> !existing.containsKey(h))
-                    .toList());
+                    .collect(Collectors.toList()));
 
             // append terminal headers too if missing
             for (String th : terminalHeaders) {
@@ -111,168 +111,69 @@ public class CsvToExcelService {
              System.out.println("DEBUG: template sheet riceIds count=" + sheetRiceRows.size());
              System.out.println("DEBUG: sample template riceIds (up to 10): " + sheetRiceRows.keySet().stream().limit(10).toList());
 
-             // Fill terminal columns for each riceId found in the sheet
+             // Fill terminal columns for EVERY row in template
+             // Iterate through ALL template rows (not CSV riceIds)
              int filledTerminalCells = 0;
-             for (Map.Entry<String, List<String>> e : terminalsByRiceId.entrySet()) {
-                String riceId = e.getKey();
-                List<String> terms = e.getValue();
-                List<Integer> candidateRows = sheetRiceRows.get(riceId);
-                Integer rowIndex = null;
-                if (candidateRows != null && !candidateRows.isEmpty()) {
-                    // choose keeper row: prefer the row that has a non-empty osVersion cell
-                    Integer osVerCol = existing.get("osVersion");
-                    if (osVerCol != null) {
-                        for (Integer rr : candidateRows) {
-                            Row row = sheet.getRow(rr);
-                            if (row == null) continue;
-                            Cell c = row.getCell(osVerCol);
-                            String sv = ExcelUtils.getStringCellValue(c);
-                            if (sv != null && !sv.isBlank()) {
-                                rowIndex = rr;
+             int templateRowCount = sheet.getLastRowNum();
+
+             for (int r = 1; r <= templateRowCount; r++) {
+                Row templateRow = sheet.getRow(r);
+                if (templateRow == null) continue;
+
+                Cell firstCell = templateRow.getCell(0);
+                String templateRiceId = ExcelUtils.getStringCellValue(firstCell);
+
+                if (templateRiceId != null && !templateRiceId.trim().isEmpty()) {
+                    // Look for terminals for this template riceId in the CSV data
+                    List<String> terminals = terminalsByRiceId.get(templateRiceId.trim());
+
+                    if (terminals == null) {
+                        // Try case-insensitive lookup
+                        for (Map.Entry<String, List<String>> entry : terminalsByRiceId.entrySet()) {
+                            if (entry.getKey() != null && entry.getKey().trim().equalsIgnoreCase(templateRiceId.trim())) {
+                                terminals = entry.getValue();
                                 break;
                             }
                         }
                     }
-                    // fallback: use first candidate
-                    if (rowIndex == null) rowIndex = candidateRows.get(0);
-                }
-                // best-effort: if still null, try robust matching via keys present in sheetRiceRows map
-                if (rowIndex == null) {
-                    // try trimmed case-insensitive key lookup
-                    for (Map.Entry<String, List<Integer>> me : sheetRiceRows.entrySet()) {
-                        String key = me.getKey();
-                        if (key != null && riceId != null && key.trim().equalsIgnoreCase(riceId.trim())) {
-                            List<Integer> list = me.getValue();
-                            if (!list.isEmpty()) rowIndex = list.get(0);
-                            break;
+
+                    if (terminals != null && !terminals.isEmpty()) {
+                        // Add terminals to this template row
+                        for (int i = 0; i < terminals.size(); i++) {
+                            String header = "terminal_" + (i + 1);
+                            Integer colIndex = existing.get(header);
+                            if (colIndex == null) continue; // shouldn't happen
+
+                            Cell cell = ExcelUtils.createCellIfAbsent(templateRow, colIndex);
+                            String value = terminals.get(i);
+                            if (value != null) {
+                                cell.setCellValue(value);
+                                filledTerminalCells++;
+                            }
                         }
+                    } else {
+                        // No terminals found for this template riceId - leave terminal columns empty (as required)
+                        // This is expected and correct behavior
                     }
-                }
-                if (rowIndex == null) {
-                    // riceId not present in template
-                    continue;
-                }
-                Row excelRow = sheet.getRow(rowIndex);
-                if (excelRow == null) excelRow = sheet.createRow(rowIndex);
-                // write each terminal value into the corresponding terminal_x column
-                for (int i = 0; i < terms.size(); i++) {
-                    String header = "terminal_" + (i + 1);
-                    Integer colIndex = existing.get(header);
-                    if (colIndex == null) continue; // shouldn't happen
-                    Cell cell = ExcelUtils.createCellIfAbsent(excelRow, colIndex);
-                    String value = terms.get(i);
-                    if (value != null) cell.setCellValue(value);
-                    if (value != null) filledTerminalCells++;
                 }
              }
 
              System.out.println("DEBUG: filled terminal cells count = " + filledTerminalCells);
 
-            // Now remove duplicate rows per riceId, keeping only the keeper selected above (osVersion row)
-            // Collect all rows to remove
-            List<Integer> rowsToRemove = new ArrayList<>();
-            for (Map.Entry<String, List<Integer>> me : sheetRiceRows.entrySet()) {
-                List<Integer> list = me.getValue();
-                if (list.size() <= 1) continue;
-                // determine keeper as above
-                Integer keeper = null;
-                Integer osVerCol = existing.get("osVersion");
-                if (osVerCol != null) {
-                    for (Integer rr : list) {
-                        Row row = sheet.getRow(rr);
-                        if (row == null) continue;
-                        String sv = ExcelUtils.getStringCellValue(row.getCell(osVerCol));
-                        if (sv != null && !sv.isBlank()) { keeper = rr; break; }
-                    }
-                }
-                if (keeper == null) keeper = list.get(0);
-                for (Integer rr : list) {
-                    if (!rr.equals(keeper)) rowsToRemove.add(rr);
-                }
+            // DO NOT remove duplicate rows - keep all rows from template as required
+            // The requirement is to maintain the same number of rows (2360) as the template
+
+            System.out.println("DEBUG: template sheet riceIds count=" + sheetRiceRows.size());
+            List<String> sampleKeys = new ArrayList<String>();
+            int count = 0;
+            for (String key : sheetRiceRows.keySet()) {
+                if (count >= 10) break;
+                sampleKeys.add(key);
+                count++;
             }
-            if (!rowsToRemove.isEmpty()) {
-                // sort descending to safely remove rows and shift
-                rowsToRemove.sort(Comparator.reverseOrder());
-                for (Integer rr : rowsToRemove) {
-                    int last = sheet.getLastRowNum();
-                    Row row = sheet.getRow(rr);
-                    if (row != null) {
-                        sheet.removeRow(row);
-                        if (rr < last) {
-                            sheet.shiftRows(rr + 1, last, -1);
-                        }
-                    }
-                }
-            }
+            System.out.println("DEBUG: sample template riceIds (up to 10): " + sampleKeys);
+            System.out.println("DEBUG: Total rows in template after processing: " + (sheet.getLastRowNum() + 1));
 
-            // After shifting rows, rebuild the map of riceId -> sheet row indices because indices changed
-            sheetRiceRows.clear();
-            lastRowNum = sheet.getLastRowNum();
-            for (int r = 1; r <= lastRowNum; r++) {
-                Row row = sheet.getRow(r);
-                if (row == null) continue;
-                Cell first = row.getCell(0);
-                String v = ExcelUtils.getStringCellValue(first);
-                if (v != null && !v.isBlank()) {
-                    sheetRiceRows.computeIfAbsent(v, k -> new ArrayList<>()).add(r);
-                }
-            }
-
-            System.out.println("DEBUG: rebuilt template sheet riceIds count=" + sheetRiceRows.size());
-            System.out.println("DEBUG: sample rebuilt template riceIds (up to 10): " + sheetRiceRows.keySet().stream().limit(10).toList());
-
-            // Also keep existing CSV-to-sheet behavior for other CSV headers (map csv rows to excel rows by index)
-            // write data rows: map each CSV row to the corresponding template row by riceId
-            for (int i = 1; i < rows.size(); i++) {
-                String[] data = rows.get(i);
-                if (data == null || data.length == 0) continue;
-                // sanitize riceId (trim and remove surrounding quotes)
-                String riceIdRaw = data[0];
-                if (riceIdRaw == null) continue;
-                String riceId = riceIdRaw.trim();
-                if (riceId.startsWith("\"") && riceId.endsWith("\"") && riceId.length() >= 2) {
-                    riceId = riceId.substring(1, riceId.length() - 1).trim();
-                }
-                if (riceId.isBlank()) continue;
-
-                // find corresponding template row index for this riceId
-                Integer rowIndex = null;
-                List<Integer> candidateRows = sheetRiceRows.get(riceId);
-                if (candidateRows != null && !candidateRows.isEmpty()) {
-                    rowIndex = candidateRows.get(0);
-                } else {
-                    // fallback: trimmed case-insensitive lookup
-                    for (Map.Entry<String, List<Integer>> me : sheetRiceRows.entrySet()) {
-                        String key = me.getKey();
-                        if (key != null && key.trim().equalsIgnoreCase(riceId.trim())) {
-                            List<Integer> list = me.getValue();
-                            if (!list.isEmpty()) rowIndex = list.get(0);
-                            break;
-                        }
-                    }
-                }
-                if (rowIndex == null) continue; // riceId not present in template
-
-                Row r = sheet.getRow(rowIndex);
-                if (r == null) r = sheet.createRow(rowIndex);
-
-                // write values for each CSV header into the found template row
-                for (int col = 0; col < headers.length; col++) {
-                    String header = headers[col];
-                    if (header == null || header.isBlank()) continue;
-                    Integer colIndex = existing.get(header);
-                    if (colIndex == null) continue; // shouldn't happen
-                    Cell cell = ExcelUtils.createCellIfAbsent(r, colIndex);
-                    String value = data.length > col ? data[col] : null;
-                    if (value != null) {
-                        // strip surrounding quotes
-                        if (value.startsWith("\"") && value.endsWith("\"")) {
-                            value = value.substring(1, value.length()-1);
-                        }
-                        cell.setCellValue(value);
-                    }
-                }
-            }
 
             // write workbook to a temp file then move atomically
             Path out = Path.of(outputPath);
